@@ -1,0 +1,95 @@
+.\"
+.\" Copyright (c) 2011-2012 Hans Petter Selasky <hselasky@freebsd.org>
+.\" Copyright (c) 2025 Nicolas Provost <dev@nicolas-provost.fr>
+.\"
+.\" All rights reserved.
+.\"
+.\" Redistribution and use in source and binary forms, with or without
+.\" modification, are permitted provided that the following conditions
+.\" are met:
+.\" 1. Redistributions of source code must retain the above copyright
+.\"    notice, this list of conditions and the following disclaimer.
+.\" 2. Redistributions in binary form must reproduce the above copyright
+.\"    notice, this list of conditions and the following disclaimer in the
+.\"    documentation and/or other materials provided with the distribution.
+.\"
+.\" THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+.\" ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+.\" IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+.\" ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+.\" FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+.\" DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+.\" OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+.\" HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+.\" LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+.\" OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+.\" SUCH DAMAGE.
+.\"
+.\"
+.Dd November 10, 2025
+.Dt JACK_MIDI 8
+.Sh NAME
+.Nm jack_midi
+.Nd daemon that converts a raw MIDI device (USB or not) into a JACK MIDI device.
+.Sh SYNOPSIS
+.Nm
+.Op Fl d Ar <device_name>
+.Op Fl C Ar <capture_device_name>
+.Op Fl P Ar <playback_device_name>
+.Op Fl n Ar <port_name>
+.Op Fl k
+.Op Fl B
+.Op Fl U Ar <username>
+.Op Fl h
+.Sh DESCRIPTION
+.Nm
+is a daemon that provides access to raw devices via the Jack system.
+The daemon will not exit when a device becomes unavailable, but will wait
+until the device re-appears again.
+.Pp
+The following options are available:
+.Bl -tag -width indent
+.It Fl k
+Terminate the client when the first capture or playback device is no longer available.
+Else the client will try to re-connect.
+.It Fl B
+Run the client in background mode.
+.It Fl d
+Specify the device name of the USB device to use, for example /dev/midi0.0 .
+.It Fl C
+Specify the capture only device name of the USB device to use, for example /dev/midi0.0 .
+.It Fl n
+Specify a full port name when registering with the JACK server.
+The default value is "jack_midi_midi0.0" for /dev/midi0.0.
+.It Fl P
+Specify the playback only device name of the USB device to use, for example /dev/midi0.0 .
+.It Fl U
+Specify which JACK user the program should attach to.
+Default is same as running user.
+.It Fl h
+Print help text showing available options.
+.El
+.Sh EXAMPLES
+.Pp
+.Bd -literal -offset indent
+# Start Jack MIDI client in background mode
+jack_midi -d /dev/midi0.0 -B
+
+# Start Jack MIDI client in front mode using USB device
+jack_midi -d /dev/umidi0.0
+
+.Ed
+.Sh SEE ALSO
+.Xr jackd 1 ,
+.Xr jack-keyboard 1,
+.Xr jack_umidi 8,
+.Xr snd_uaudio 4
+.Sh TROUBLESHOOTING
+Check that the permissions are correct for your MIDI devices.
+.Sh HISTORY
+.Nm
+was written by
+.An Nicolas Provost dev@nicolas-provost.fr .
+jack_umidi was written by
+.An Hans Petter Selasky hselasky@freebsd.org .
+.Pp
