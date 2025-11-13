@@ -60,6 +60,7 @@ static int read_fd = -1;
 static int write_fd = -1;
 static int kill_on_close;
 static int debug_mode;
+static int expand;
 static int background;
 static char *read_name = NULL;
 static char *write_name = NULL;
@@ -391,7 +392,8 @@ jack_midi_read(jack_nframes_t nframes)
 		for (int n = 0; midi_frames_offset < midi_frames_len;
 			midi_frames_offset++, n++) {
 			mf = &midi_frames[midi_frames_offset];
-			jack_midi_expand_running (mf);
+			if (expand)
+				jack_midi_expand_running (mf);
 			buffer = jack_midi_event_reserve(buf,
 						jack_counter, mf->len);
 			if (buffer == NULL)
@@ -603,7 +605,7 @@ main(int argc, char **argv)
 {
 	int c;
 
-	while ((c = getopt(argc, argv, "U:kBd:hP:SC:n:g")) != -1) {
+	while ((c = getopt(argc, argv, "U:kBd:hP:SC:n:gx")) != -1) {
 		switch (c) {
 		case 'k':
 			kill_on_close = 1;
@@ -634,6 +636,9 @@ main(int argc, char **argv)
 			break;
 		case 'g':
 			debug_mode = 1;
+			break;
+		case 'x':
+			expand = 1;
 			break;
 		case 'h':
 		default:
