@@ -261,7 +261,7 @@ jack_midi_openclose (void)
 }
 
 static void
-usage()
+usage (const char *msg)
 {
 	dprintf (2,
 	"jack_midi v%s - Jack MIDI socket client\n"
@@ -279,7 +279,9 @@ usage()
 	"    -M <file> dump frames to <file> (descriptor or path), hex mode\n"
 	"    -h (show help)\n",
 	JACK_MIDI_VERSION);
-	exit (0);
+	if (msg)
+		dprintf (2, "%s\n", msg);
+	exit (msg ? 1 : 0);
 }
 
 static void
@@ -443,14 +445,16 @@ main(int argc, char **argv)
 			dump_file = strdup (optarg);
 			break;
 		case 'h':
+			usage (NULL);
+			break;
 		default:
-			usage();
+			usage ("Unknown option.");
 		}
 	}
 
 	if ((read_name == NULL && write_name == NULL) ||
 		(dump_file != NULL && read_name == NULL))
-		usage ();
+		usage ("Missing device path.");
 
 	if (background) {
 		if (daemon (0, 0))
