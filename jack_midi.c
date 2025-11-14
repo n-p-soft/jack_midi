@@ -68,11 +68,6 @@ static char *port_name = NULL;
 static pthread_mutex_t jack_midi_mtx;
 static uid_t uid;
 static int uid_found;
-#define READ_BUF_MAX	 256
-static uint8_t read_buf[READ_BUF_MAX];
-static int read_buf_len;
-static int read_buf_offset;
-static int midi_read_back = -1;
 
 #define MIDI_FRAME_MAX	32
 typedef struct midi_frame_t {
@@ -167,22 +162,6 @@ jack_midi_write(jack_nframes_t nframes)
 		}
 		jack_midi_unlock();
 	}
-}
-
-/* returns 1 if there is data, 0 if no and -1 on error */
-static int
-jack_midi_poll(int fd)
-{
-	int r = 0;
-
-	if (fd > -1) {
-		struct pollfd pfd[1];
-
-		pfd[0].fd = fd;
-		pfd[0].events = POLLIN | POLLPRI;
-		r = poll(pfd, 1, 0);
-	}
-	return (r);
 }
 
 static void
