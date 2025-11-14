@@ -214,43 +214,37 @@ jack_midi_jack_shutdown (void *arg)
 static void
 jack_midi_openclose (void)
 {
-	if (read_name == NULL) {
-		/* do nothing */
-	}
-	else if (read_fd < 0) {
-		read_fd = open(read_name, O_RDONLY);
-		if (read_fd > -1) {
-			fcntl(read_fd, F_SETFL, (int)O_NONBLOCK);
-			jack_midi_lock();
-			midi_reader_set_fd (&reader, read_fd);
-			jack_midi_unlock();
+	if (read_name) {
+		if (read_fd < 0) {
+			read_fd = open (read_name, O_RDONLY | O_NONBLOCK);
+			if (read_fd > -1) {
+				jack_midi_lock ();
+				midi_reader_set_fd (&reader, read_fd);
+				jack_midi_unlock ();
+			}
 		}
-	}
-	else if (midi_reader_poll (&reader) < 0) {
-		DPRINTF("Close read\n");
-		jack_midi_lock();
-		midi_reader_close (&reader);
-		read_fd = -1;
-		jack_midi_unlock();
+		else if (midi_reader_poll (&reader) < 0) {
+			DPRINTF ("Close read\n");
+			jack_midi_lock ();
+			midi_reader_close (&reader);
+			read_fd = -1;
+			jack_midi_unlock ();
+		}
 	}
 
-	if (write_name == NULL) {
-		/* do nothing */
-	}
-	else if (write_fd < 0) {
-		write_fd = open(write_name, O_WRONLY);
-		if (write_fd > -1) {
-			jack_midi_lock();
-			fcntl(write_fd, F_SETFL, (int)0);
-			jack_midi_unlock();
+	if (write_name) {
+		if (write_fd < 0) {
+			jack_midi_lock ();
+			write_fd = open (write_name, O_WRONLY | O_NONBLOCK);
+			jack_midi_unlock ();
 		}
-	}
-	else if (fcntl (write_fd, F_SETFL, (int) O_NONBLOCK) < 0) {
-		DPRINTF("Close write\n");
-		jack_midi_lock();
-		close(write_fd);
-		write_fd = -1;
-		jack_midi_unlock();
+		else if (fcntl (write_fd, F_SETFL, (int) O_NONBLOCK) < 0) {
+			DPRINTF ("Close write\n");
+			jack_midi_lock ();
+			close (write_fd);
+			write_fd = -1;
+			jack_midi_unlock ();
+		}
 	}
 
 	/* check if we should close */
@@ -262,7 +256,7 @@ jack_midi_openclose (void)
 		if (read_name != NULL && read_fd == -1)
 			stop = 1;
 		if (stop)
-			jack_midi_jack_shutdown(NULL);
+			jack_midi_jack_shutdown (NULL);
 	}
 }
 
@@ -299,6 +293,9 @@ jack_midi_create_client (int background)
 	char *devname;
 	int error;
 
+	if (jack_client)
+		return;
+
 	if (port_name)
 		devname = strdup (port_name);
 	else {
@@ -324,59 +321,48 @@ jack_midi_create_client (int background)
 	if (devname == NULL)
 		errx (EX_OSERR, "Out of memory.");
 
-	while (jack_client == NULL) {
-		jack_client = jack_client_open (devname,
-						JackNoStartServer, NULL);
-		if (jack_client == NULL) {
-			if (background) {
-				/* check status of MIDI device */
-				jack_midi_openclose ();
-
-				/* wait a bit */
-				usleep(100000);
-			}
-			else {
-				errx (EX_UNAVAILABLE, "Could not connect "
-			    		"to the JACK server. Run jackd first?");
-			}
-		}
-	}
+	jack_client = jack_client_open (devname, JackNoStartServer, NULL);
 	free (devname);
-	error = jack_set_process_callback (jack_client,
+	if (jack_client == NULL) {
+		/* check status of MIDI device */
+		jack_midi_openclose ();
+	}
+	else {
+		error = jack_set_process_callback (jack_client,
 					jack_midi_process_callback, 0);
-	if (error) {
-		errx (EX_UNAVAILABLE, "Could not register "
+		if (error) {
+			errx (EX_UNAVAILABLE, "Could not register "
 					"JACK process callback.");
-	}
-
-	jack_set_buffer_size (jack_client, 64);
-	jack_on_shutdown (jack_client, jack_midi_jack_shutdown, 0);
-
-	if (read_name != NULL) {
-		output_port[0] = jack_port_register (
-		    jack_client, ".TX", JACK_DEFAULT_MIDI_TYPE,
-		    JackPortIsOutput | JackPortIsPhysical |
-		    JackPortIsTerminal, 0);
-
-		if (output_port[0] == NULL) {
-			errx (EX_UNAVAILABLE, "Could not "
-			    "register JACK output port.");
 		}
-	}
-	if (write_name != NULL) {
 
-		input_port = jack_port_register (
-		    jack_client, ".RX", JACK_DEFAULT_MIDI_TYPE,
-		    JackPortIsInput | JackPortIsPhysical |
-		    JackPortIsTerminal, 0);
+		jack_set_buffer_size (jack_client, 64);
+		jack_on_shutdown (jack_client, jack_midi_jack_shutdown, 0);
 
-		if (input_port == NULL) {
-			errx (EX_UNAVAILABLE, "Could not "
-			    "register JACK input port.");
+		if (read_name != NULL) {
+			output_port[0] = jack_port_register (
+			jack_client, ".TX", JACK_DEFAULT_MIDI_TYPE,
+			JackPortIsOutput | JackPortIsPhysical |
+			JackPortIsTerminal, 0);
+
+			if (output_port[0] == NULL) {
+				errx (EX_UNAVAILABLE, "Could not "
+				    "register JACK output port.");
+			}
 		}
+		if (write_name != NULL) {
+			input_port = jack_port_register (
+			jack_client, ".RX", JACK_DEFAULT_MIDI_TYPE,
+			JackPortIsInput | JackPortIsPhysical |
+			JackPortIsTerminal, 0);
+
+			if (input_port == NULL) {
+				errx (EX_UNAVAILABLE, "Could not "
+				    "register JACK input port.");
+			}
+		}
+		if (jack_activate (jack_client))
+			errx (EX_UNAVAILABLE, "Cannot activate JACK client.");
 	}
-	if (jack_activate (jack_client))
-		errx (EX_UNAVAILABLE, "Cannot activate JACK client.");
 }
 
 int
@@ -393,7 +379,6 @@ main(int argc, char **argv)
 	long l;
 	char *dump_file = NULL;
 	int dump_hex = 0;
-	int jack = 0;
 
 	to_skip[0] = 0;
 	while ((c = getopt(argc, argv, "U:kBd:hP:SC:n:gxf:m:M:")) != -1) {
@@ -457,9 +442,8 @@ main(int argc, char **argv)
 		}
 	}
 
-	if (read_name || write_name)
-		jack = 1;
-	else if (dump_file == NULL)
+	if ((read_name == NULL && write_name == NULL) ||
+		(dump_file != NULL && read_name == NULL))
 		usage ();
 
 	if (background) {
@@ -470,10 +454,9 @@ main(int argc, char **argv)
 	if (have_uid && setuid (uid) != 0)
 		errx (EX_UNAVAILABLE, "Could not set user ID");
 
-	if (jack)
-		signal (SIGPIPE, jack_midi_pipe);
+	signal (SIGPIPE, jack_midi_pipe);
 
-	/* try to open MIDI device early on */
+	/* MIDI reader setup */
 	if (debug_mode)
 		flags += MIDIR_DEBUG;
 	if (expand)
@@ -501,23 +484,20 @@ main(int argc, char **argv)
 		free (dump_file);
 		midi_reader_set_dump_fd (&reader, dfd);
 	}
-	if (jack) {
-		pthread_mutex_init (&jack_midi_mtx, NULL);
-		jack_midi_openclose ();
 
-		/* create jack client */
-		jack_midi_create_client (background);
-	}
+	pthread_mutex_init (&jack_midi_mtx, NULL);
 
 	/* loop */
 	while (1) {
 		/* check status of MIDI device */
-		if (jack)
-			jack_midi_openclose ();
+		jack_midi_openclose ();
+
+		/* create jack client if needed */
+		jack_midi_create_client (background);
 
 		/* read frame */
 		midi_reader_update (&reader);
-		if ( ! jack)
+		if (jack_client == NULL)
 			midi_reader_clear_queue (&reader);
 
 		/* wait a bit */

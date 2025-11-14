@@ -51,10 +51,18 @@
 is a daemon that provides access to raw MIDI devices via the Jack system, or simply dump MIDI frames to some file. At least one of the flags
 .Fl d ,
 .Fl C ,
-.Fl P ,
-.Fl m ,
-.Fl M
+.Fl P
 must be specified.
+.Pp
+If
+.Fl m
+or
+.Fl M
+is specified, then
+.Fl d
+or
+.Fl C
+is needed, and if no Jack server is found, only the dump of the MIDI-in will be done. In other cases, a running Jack server is required.
 .Pp
 The following options are available:
 .Bl -tag -width indent
