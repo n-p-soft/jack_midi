@@ -26,7 +26,7 @@
 .\" SUCH DAMAGE.
 .\"
 .\"
-.Dd November 10, 2025
+.Dd November 14, 2025
 .Dt JACK_MIDI 8
 .Sh NAME
 .Nm jack_midi
@@ -45,15 +45,12 @@
 .Op Fl h
 .Sh DESCRIPTION
 .Nm
-is a daemon that provides access to raw devices via the Jack system.
-The daemon will not exit when a device becomes unavailable, but will wait
-until the device re-appears again.
+is a daemon that provides access to raw MIDI devices via the Jack system.
 .Pp
 The following options are available:
 .Bl -tag -width indent
 .It Fl k
-Terminate the client when the first capture or playback device is no longer available.
-Else the client will try to re-connect.
+Terminate the client when the first capture or playback device is no longer available. The default behaviour is to wait until the device is available and try to re-connect.
 .It Fl B
 Run the client in background mode.
 .It Fl d
@@ -71,7 +68,8 @@ Default is same as running user.
 .It Fl g
 Dump content of MIDI frame once it is read.
 .It Fl x
-Expand running status MIDI frames (90 x1 x2 x3 x4 -> 90 x1 x2 90 x3 x4).
+Expand running status MIDI frames, for example (NOTEON event):
+0x90 x1 x2 x3 x4 -> 0x90 x1 x2 0x90 x3 x4.
 .It Fl h
 Print help text showing available options.
 .El
@@ -87,15 +85,12 @@ jack_midi -d /dev/umidi0.0
 .Ed
 .Sh SEE ALSO
 .Xr jackd 1 ,
-.Xr jack-keyboard 1,
-.Xr jack_umidi 8,
+.Xr jack_umidi 8 ,
 .Xr snd_uaudio 4
 .Sh TROUBLESHOOTING
 Check that the permissions are correct for your MIDI devices.
 .Sh HISTORY
 .Nm
 was written by
-.An Nicolas Provost dev@nicolas-provost.fr .
-jack_umidi was written by
-.An Hans Petter Selasky hselasky@freebsd.org .
+.An Nicolas Provost <dev@nicolas-provost.fr> .
 .Pp
