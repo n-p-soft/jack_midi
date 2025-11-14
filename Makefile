@@ -47,7 +47,7 @@ CFLAGS+=	-DHAVE_DEBUG
 CFLAGS+=	-g
 .endif
 
-SRCS=		jack_midi.c
+SRCS=		jack_midi.c midi_reader.c
 
 .if defined(HAVE_MAN)
 MAN=		jack_midi.8

@@ -31,17 +31,17 @@
 #include <poll.h>
 #include <string.h>
 
-bool
+int
 midi_reader_poll (midi_reader_t *reader)
 {
 	if (reader == NULL || reader->fd < 0)
-		return (false);
+		return (-1);
 	else {
 		struct pollfd pfd[1];
 
 		pfd[0].fd = reader->fd;
 		pfd[0].events = POLLIN | POLLPRI;
-		return (poll(pfd, 1, 0) > 0);
+		return (poll(pfd, 1, 0));
 	}
 }
 
@@ -66,6 +66,13 @@ midi_reader_close (midi_reader_t *reader)
 		reader->fd = -1;
 		reader->push_back = -1;
 	}
+}
+
+void
+midi_reader_set_fd (midi_reader_t *reader, int fd)
+{
+	if (reader)
+		reader->fd = fd;
 }
 
 static int

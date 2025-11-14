@@ -119,6 +119,10 @@ void
 midi_reader_init (midi_reader_t* reader, midi_reader_flags_t flags,
 			int fd, const unsigned char *to_skip);
 
+/* Change the device descriptor into the reader. */
+void
+midi_reader_set_fd (midi_reader_t *reader, int fd);
+			
 /* Close a MIDI reader. Note that midi_reader_get_next may be called after
  * this until the frames already read are exhausted, but no new frame will
  * be read.
@@ -126,8 +130,10 @@ midi_reader_init (midi_reader_t* reader, midi_reader_flags_t flags,
 void
 midi_reader_close (midi_reader_t* reader);
 
-/* Returns true if the reader can now read one byte. */
-bool
+/* Returns -1 if the midi device is no more readable, 0 if there is no byte to
+ * read, else 1.
+ */
+int
 midi_reader_poll (midi_reader_t* reader);
 
 /* Reset a MIDI frame. */

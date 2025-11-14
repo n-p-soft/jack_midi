@@ -41,6 +41,7 @@
 .Op Fl B
 .Op Fl U Ar <username>
 .Op Fl x
+.Op Fl g
 .Op Fl h
 .Sh DESCRIPTION
 .Nm
@@ -67,6 +68,8 @@ Specify the playback only device name of the USB device to use, for example /dev
 .It Fl U
 Specify which JACK user the program should attach to.
 Default is same as running user.
+.It Fl g
+Dump content of MIDI frame once it is read.
 .It Fl x
 Expand running status MIDI frames (90 x1 x2 x3 x4 -> 90 x1 x2 90 x3 x4).
 .It Fl h
