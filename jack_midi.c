@@ -288,6 +288,11 @@ jack_midi_pipe(int dummy)
 }
 
 static void
+jack_midi_log_callback (const char *desc)
+{
+}
+
+static void
 jack_midi_create_client (int background)
 {	
 	char *devname;
@@ -379,6 +384,7 @@ main(int argc, char **argv)
 	long l;
 	char *dump_file = NULL;
 	int dump_hex = 0;
+	int start = 1;
 
 	to_skip[0] = 0;
 	while ((c = getopt(argc, argv, "U:kBd:hP:SC:n:gxf:m:M:")) != -1) {
@@ -486,6 +492,8 @@ main(int argc, char **argv)
 	}
 
 	pthread_mutex_init (&jack_midi_mtx, NULL);
+	jack_error_callback = jack_midi_log_callback;
+	jack_info_callback = jack_midi_log_callback;
 
 	/* loop */
 	while (1) {
@@ -494,6 +502,20 @@ main(int argc, char **argv)
 
 		/* create jack client if needed */
 		jack_midi_create_client (background);
+		if (jack_client == NULL) {
+			if (dump_file == NULL) {
+				errx (EX_UNAVAILABLE,
+				"Unable to create Jack client and no dump file "
+				"file requested, stopping now. Check that a "
+				" Jack server is running.");
+			}
+			else if (start) {
+				start = 0;
+				warnx ("Unable to create Jack client; dump "
+					"mode only until a Jack server is "
+					"started.");
+			}
+		}
 
 		/* read frame */
 		midi_reader_update (&reader);

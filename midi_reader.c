@@ -211,11 +211,8 @@ void
 midi_frame_dump (int fd, midi_frame_t *mf)
 {
 	if (fd > -1 && mf) {
-		for (int j = 0; j < mf->len; j++) {
-			dprintf (fd, "%.2x", mf->data[j]);
-			if (j + 1 != mf->len)
-				dprintf (fd, " ");
-		}
+		for (int j = 0; j < mf->len; j++)
+			dprintf (fd, "%.2x ", mf->data[j]);
 	}
 }
 
