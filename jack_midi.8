@@ -30,7 +30,7 @@
 .Dt JACK_MIDI 8
 .Sh NAME
 .Nm jack_midi
-.Nd daemon that converts a raw MIDI device (USB or not) into a JACK MIDI device.
+.Nd daemon that converts a raw MIDI device (USB or not) into a JACK MIDI device and/or creates a MIDI dump file.
 .Sh SYNOPSIS
 .Nm
 .Op Fl d Ar <device_name>
@@ -43,10 +43,18 @@
 .Op Fl x
 .Op Fl g
 .Op Fl f Ar <status_code>
+.Op Fl m Ar <file>
+.Op Fl M Ar <file>
 .Op Fl h
 .Sh DESCRIPTION
 .Nm
-is a daemon that provides access to raw MIDI devices via the Jack system.
+is a daemon that provides access to raw MIDI devices via the Jack system, or simply dump MIDI frames to some file. At least one of the flags
+.Fl d ,
+.Fl C ,
+.Fl P ,
+.Fl m ,
+.Fl M
+must be specified.
 .Pp
 The following options are available:
 .Bl -tag -width indent
@@ -73,6 +81,12 @@ Expand running status MIDI frames, for example (NOTEON event):
 0x90 x1 x2 x3 x4 -> 0x90 x1 x2 0x90 x3 x4.
 .It Fl f
 Filter-out frames with status byte (first byte) equal to given value. Option may appear multiple times on the command-line.
+.It Fl m
+Dump MIDI frames that are read to given file (either a numeric descriptor or a
+file path), binary format (raw).
+.It Fl M
+Dump MIDI frames that are read to given file (either a numeric descriptor or a
+file path), hex format.
 .It Fl h
 Print help text showing available options.
 .El

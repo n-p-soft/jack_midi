@@ -271,17 +271,19 @@ usage()
 {
 	dprintf (2,
 	"jack_midi v%s - Jack MIDI socket client\n"
-	"	-d /dev/midi0.0 set capture and playback device\n"
-	"	-C /dev/midi0.0 set capture device\n"
-	"	-P /dev/midi0.0 set playback device\n"
-	"	-U <username> attach to this JACK user\n"
-	"	-B run in background\n"
-	"	-k terminate client if a device goes away\n"
-	"	-n specify Jack port name: default is jack_midi_...\n"
-	"       -g show trames (debug mode)\n"
-	"       -x expand running status MIDI frames\n"
-	"       -f <n> filter-out frames with status byte <n>\n"
-	"	-h (show help)\n",
+	"    -d </dev/xxx> set capture and playback device\n"
+	"    -C </dev/xxx> set capture device only\n"
+	"    -P </dev/xxx> set playback device only\n"
+	"    -U <username> attach to this JACK user\n"
+	"    -B run in background\n"
+	"    -k terminate client if a device goes away\n"
+	"    -n <port> specify Jack port name: default is jack_midi_...\n"
+	"    -g show trames (debug mode)\n"
+	"    -x expand running status MIDI frames\n"
+	"    -f <n> filter-out frames with status byte <n>\n"
+	"    -m <file> dump frames to <file> (descriptor or path)\n"
+	"    -M <file> dump frames to <file> (descriptor or path), hex mode\n"
+	"    -h (show help)\n",
 	JACK_MIDI_VERSION);
 	exit (0);
 }
@@ -389,9 +391,12 @@ main(int argc, char **argv)
 	int skipped = 0;
 	char *endptr;
 	long l;
+	char *dump_file = NULL;
+	int dump_hex = 0;
+	int jack = 0;
 
 	to_skip[0] = 0;
-	while ((c = getopt(argc, argv, "U:kBd:hP:SC:n:gxf:")) != -1) {
+	while ((c = getopt(argc, argv, "U:kBd:hP:SC:n:gxf:m:M:")) != -1) {
 		switch (c) {
 		case 'k':
 			kill_on_close = 1;
@@ -439,13 +444,22 @@ main(int argc, char **argv)
 			}
 			to_skip[skipped++] = (unsigned char) l;
 			break;
+		case 'M':
+			dump_hex = 1;
+			/* fallthru */
+		case 'm':
+			free (dump_file);
+			dump_file = strdup (optarg);
+			break;
 		case 'h':
 		default:
 			usage();
 		}
 	}
 
-	if (read_name == NULL && write_name == NULL)
+	if (read_name || write_name)
+		jack = 1;
+	else if (dump_file == NULL)
 		usage ();
 
 	if (background) {
@@ -456,27 +470,55 @@ main(int argc, char **argv)
 	if (have_uid && setuid (uid) != 0)
 		errx (EX_UNAVAILABLE, "Could not set user ID");
 
-	signal (SIGPIPE, jack_midi_pipe);
+	if (jack)
+		signal (SIGPIPE, jack_midi_pipe);
 
 	/* try to open MIDI device early on */
-	pthread_mutex_init (&jack_midi_mtx, NULL);
 	if (debug_mode)
 		flags += MIDIR_DEBUG;
 	if (expand)
 		flags += MIDIR_EXPAND;
-	midi_reader_init (&reader, flags, -1, skipped ? to_skip : NULL);
-	jack_midi_openclose ();
+	if (dump_hex)
+		flags += MIDIR_DUMPHEX;
+	midi_reader_init (&reader, flags, skipped ? to_skip : NULL);
+	if (dump_file) {
+		int dfd;
 
-	/* create jack client */
-	jack_midi_create_client (background);
+		if (dump_file[0] >= '0' && dump_file[0] <= '9') {
+			l = strtol (dump_file, &endptr, 0);
+			if (l < 0 || l > 255 || (endptr && *endptr))
+				errx (EX_USAGE, "bad dump file descriptor");
+			else
+				dfd = (int) l;
+		}
+		else {
+			dfd = open (dump_file, O_CREAT|O_TRUNC|O_WRONLY, 0600);
+			if (dfd < 0) {
+				errx (EX_OSERR, "unable to open file %s",
+					dump_file);
+			}
+		}
+		free (dump_file);
+		midi_reader_set_dump_fd (&reader, dfd);
+	}
+	if (jack) {
+		pthread_mutex_init (&jack_midi_mtx, NULL);
+		jack_midi_openclose ();
+
+		/* create jack client */
+		jack_midi_create_client (background);
+	}
 
 	/* loop */
 	while (1) {
 		/* check status of MIDI device */
-		jack_midi_openclose();
+		if (jack)
+			jack_midi_openclose ();
 
 		/* read frame */
 		midi_reader_update (&reader);
+		if ( ! jack)
+			midi_reader_clear_queue (&reader);
 
 		/* wait a bit */
 		usleep(1000);

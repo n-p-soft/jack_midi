@@ -68,6 +68,7 @@ typedef enum midi_reader_flags_t
 	MIDIR_NONE = 0,
 	MIDIR_DEBUG = 1, /* show frame content when it is read */
 	MIDIR_EXPAND = 2, /* expand running status frames */
+	MIDIR_DUMPHEX = 4, /* dump in hex format, not binary */
 } midi_reader_flags_t;
 
 /* max length of read buffer */
@@ -78,6 +79,7 @@ typedef struct midi_reader_t
 {
 	midi_reader_flags_t flags; /* reader flags */
 	int fd; /* file descriptor to read from */
+	int dumpfd; /* dump file descriptor */
 	unsigned char running; /* current running status command or 0 */
 	midi_frames_t frames; /* frames that were read */
 	const unsigned char *to_skip; /* if not NULL, 0-terminated array of
@@ -114,15 +116,20 @@ static const int midi_frame_len[256] = {
 
 /* Initialize a MIDI reader. 'to_skip' may be NULL or a pointer to a ZERO-
  * terminated array of status bytes which coreesponding frames will be skipped.
+ * User should called "midi_reader_set_fd" after this.
  */
 void
 midi_reader_init (midi_reader_t* reader, midi_reader_flags_t flags,
-			int fd, const unsigned char *to_skip);
+			const unsigned char *to_skip);
 
 /* Change the device descriptor into the reader. */
 void
 midi_reader_set_fd (midi_reader_t *reader, int fd);
 			
+/* Set the file descriptor where to dump frames. */
+void
+midi_reader_set_dump_fd (midi_reader_t *reader, int fd);
+
 /* Close a MIDI reader. Note that midi_reader_get_next may be called after
  * this until the frames already read are exhausted, but no new frame will
  * be read.
@@ -163,6 +170,10 @@ midi_reader_update (midi_reader_t *reader);
 /* Return next valid MIDI frame read by the reader, or NULL if none. */
 midi_frame_t*
 midi_reader_get_next (midi_reader_t *reader);
+
+/* Remove all recorded frames. */
+void
+midi_reader_clear_queue (midi_reader_t *reader);
 
 /* Expand given MIDI frame if it is a running status one. May return false on
  * error, for example if there was not enough room available into 'mf' (but
