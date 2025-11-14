@@ -44,7 +44,7 @@ typedef enum midi_frame_state_t {
 } midi_frame_state_t;
 
 /* max count of bytes in a MIDI frame */
-#define MIDI_FRAME_MAX	64
+#define MIDI_FRAME_MAX	128
 
 /* MIDI frame */
 typedef struct midi_frame_t {
@@ -53,7 +53,7 @@ typedef struct midi_frame_t {
 } midi_frame_t;
 
 /* max count of frames in midi_frames_t */
-#define MIDI_FRAMES_LEN	256
+#define MIDI_FRAMES_MAX	256
 
 /* an array of MIDI frames */
 typedef struct midi_frames_t {
@@ -62,12 +62,21 @@ typedef struct midi_frames_t {
 	midi_frame_t frames[MIDI_FRAMES_MAX]; /* the frames */
 } midi_frames_t;
 
+/* flags for the MIDI reader */
+typedef enum midi_reader_flags_t
+{
+	MIDIR_NONE = 0,
+	MIDIR_DEBUG = 1, /* show frame content when it is read */
+	MIDIR_EXPAND = 2, /* expand running status frames */
+} midi_reader_flags_t;
+
 /* max length of read buffer */
 #define MIDI_READER_BUF_MAX	 256
 
 /* used to read bytes and store MIDI frames */
 typedef struct midi_reader_t
 {
+	midi_reader_flags_t flags; /* reader flags */
 	int fd; /* file descriptor to read from */
 	unsigned char running; /* current running status command or 0 */
 	midi_frames_t frames; /* frames that were read */
@@ -103,23 +112,29 @@ static const int midi_frame_len[256] = {
 	/* F8 system real-time */ 1, 1, 1, 1, 1, 1, 1, 1
 };
 
-/* initialize a MIDI reader */
+/* Initialize a MIDI reader. 'to_skip' may be NULL or a pointer to a ZERO-
+ * terminated array of status bytes which coreesponding frames will be skipped.
+ */
 void
-midi_reader_init (midi_reader_t* reader, int fd, const unsigned char *to_skip);
+midi_reader_init (midi_reader_t* reader, midi_reader_flags_t flags,
+			int fd, const unsigned char *to_skip);
 
-/* close a MIDI reader */
+/* Close a MIDI reader. Note that midi_reader_get_next may be called after
+ * this until the frames already read are exhausted, but no new frame will
+ * be read.
+ */
 void
 midi_reader_close (midi_reader_t* reader);
 
-/* returns true if the reader can now read one byte */
+/* Returns true if the reader can now read one byte. */
 bool
 midi_reader_poll (midi_reader_t* reader);
 
-/* reset a MIDI frame */
+/* Reset a MIDI frame. */
 void
 midi_frame_reset (midi_frame_t* mf);
 
-/* read a byte using the reader and push it in the MIDI frame. Return value:
+/* Read a byte using the reader and push it in the MIDI frame. Return value:
  * MIDIF_IOERROR: could not read byte
  * MIDIF_NOBYTE: no byte read
  * MIDIF_ERROR: byte received could not be pushed, frame was reset
@@ -130,22 +145,18 @@ midi_frame_reset (midi_frame_t* mf);
 midi_frame_state_t
 midi_frame_push (midi_reader_t* reader, midi_frame_t* mf);
 
-/* dump the frame content */
+/* Dump the frame content. */
 void
 midi_frame_dump (int fd, midi_frame_t *mf);
 
-/* read a full MIDI frame using the reader and store it in embedded array.
- * Return codes are the same then midi_frame_push.
- */
-midi_frame_state_t
-midi_reader_read_one (midi_reader_t *reader);
- 
-/* Return next valid MIDI frame read by the reader, or NULL if none */
+/* Return next valid MIDI frame read by the reader, or NULL if none. */
 midi_frame_t*
 midi_reader_get_next (midi_reader_t *reader);
 
-/* expand given MIDI frame if it is a running status one */
-void
+/* Expand given MIDI frame if it is a running status one. May return false if
+ * there was not enough room available in 'mf' (but this should not occur).
+ */
+bool
 midi_frame_expand_running (midi_frame_t *mf);
 
 #ifdef __cplusplus
