@@ -43,11 +43,12 @@
 #endif
 #include <pwd.h>
 
-#include <midi_reader.h>
 
 #include <jack/jack.h>
 #include <jack/midiport.h>
 #include <jack/ringbuffer.h>
+
+#include "midi_reader.h"
 
 #define	JACK_PORT_NAME		"jack_midi"
 #define	JACK_OUT_MAX	17		/* units */
@@ -151,7 +152,7 @@ jack_midi_read (jack_nframes_t nframes)
 	void *buf;
 	midi_frame_t *mf;
 
-	if ( ! midi_reader_available (reader))
+	if ( ! midi_reader_update (&reader))
 		return;
 
 	jack_midi_lock();
@@ -170,8 +171,8 @@ jack_midi_read (jack_nframes_t nframes)
 	if (buf == NULL)
 		DPRINTF("Buffer full. MIDI event lost\n");
 	else {
-		for (int n = 0; ; n++) {
-			mf = midi_reader_get_next (reader);
+		while (1) {
+			mf = midi_reader_get_next (&reader);
 			if (mf == NULL)
 				break;
 			buffer = jack_midi_event_reserve(buf,
@@ -222,14 +223,14 @@ jack_midi_openclose (void)
 		if (read_fd > -1) {
 			fcntl(read_fd, F_SETFL, (int)O_NONBLOCK);
 			jack_midi_lock();
-			midi_reader_set_fd (reader, read_fd);
+			midi_reader_set_fd (&reader, read_fd);
 			jack_midi_unlock();
 		}
 	}
 	else if (midi_reader_poll (&reader) < 0) {
 		DPRINTF("Close read\n");
 		jack_midi_lock();
-		midi_reader_close (reader);
+		midi_reader_close (&reader);
 		read_fd = -1;
 		jack_midi_unlock();
 	}
@@ -245,7 +246,7 @@ jack_midi_openclose (void)
 			jack_midi_unlock();
 		}
 	}
-	else if (jack_midi_poll(write_fd) < 0) {
+	else if (fcntl (write_fd, F_SETFL, (int) O_NONBLOCK) < 0) {
 		DPRINTF("Close write\n");
 		jack_midi_lock();
 		close(write_fd);
@@ -458,7 +459,7 @@ main(int argc, char **argv)
 		jack_midi_openclose();
 
 		/* read frame */
-		jack_midi_read_frame();
+		midi_reader_update (&reader);
 
 		/* wait a bit */
 		usleep(1000);

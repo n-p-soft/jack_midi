@@ -155,12 +155,18 @@ midi_frame_push (midi_reader_t* reader, midi_frame_t* mf);
 void
 midi_frame_dump (int fd, midi_frame_t *mf);
 
+/* Return true if there is a MIDI frame that was read. Should be called
+ * regularly to read new frames and store them in the internal buffer. */
+bool
+midi_reader_update (midi_reader_t *reader);
+
 /* Return next valid MIDI frame read by the reader, or NULL if none. */
 midi_frame_t*
 midi_reader_get_next (midi_reader_t *reader);
 
-/* Expand given MIDI frame if it is a running status one. May return false if
- * there was not enough room available in 'mf' (but this should not occur).
+/* Expand given MIDI frame if it is a running status one. May return false on
+ * error, for example if there was not enough room available into 'mf' (but
+ * this should not occur).
  */
 bool
 midi_frame_expand_running (midi_frame_t *mf);

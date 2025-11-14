@@ -24,12 +24,12 @@
  * SUCH DAMAGE.
  */
 
-#include <midi_reader.h>
 #include <stdio.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <poll.h>
 #include <string.h>
+#include "midi_reader.h"
 
 int
 midi_reader_poll (midi_reader_t *reader)
@@ -120,7 +120,7 @@ midi_frame_push (midi_reader_t *reader, midi_frame_t *mf)
 	int b;
 
 	if (reader == NULL || mf == NULL)
-		return (MIDIF_NOBYTE);
+		return (MIDIF_NODATA);
 	if (mf->len == MIDI_FRAME_MAX) {
 		/* error, too long frame */
 		midi_frame_reset (mf);
@@ -129,7 +129,7 @@ midi_frame_push (midi_reader_t *reader, midi_frame_t *mf)
 	}
 	b = midi_reader_get_byte (reader);
 	if (b < 0)
-		return (MIDIF_NOBYTE);
+		return (MIDIF_NODATA);
 	else if (b > 0xFF)
 		return (MIDIF_IOERROR);
 	if (reader->running != 0 && (b & 0x80) != 0) {
@@ -210,7 +210,7 @@ midi_reader_read_one (midi_reader_t *reader)
 	r = midi_frame_push (reader, current);
 	if (r == MIDIF_COMPLETE) {
 		if ( ! midi_frame_skip (reader, current)) {
-			if (reader->flags & DEBUG) {
+			if (reader->flags & MIDIR_DEBUG) {
 				dprintf (2, "read frame#%i: ",
 						reader->frames.len);
 				midi_frame_dump (2, current);
@@ -219,7 +219,7 @@ midi_reader_read_one (midi_reader_t *reader)
 			reader->frames.len++;
 		}
 		else {
-			if (reader->flags & DEBUG) {
+			if (reader->flags & MIDIR_DEBUG) {
 				dprintf (2, "skipped frame#%i: ",
 						reader->frames.len);
 				midi_frame_dump (2, current);
@@ -231,28 +231,38 @@ midi_reader_read_one (midi_reader_t *reader)
 	return (r);
 }
 
+bool
+midi_reader_update (midi_reader_t *reader)
+{
+	if (reader == NULL)
+		return (false);
+	else if (reader->frames.len == 0)
+		return (midi_reader_read_one (reader) == MIDIF_COMPLETE);
+	else if (reader->frames.len < MIDI_FRAMES_MAX) {
+		if (reader->frames.offset < reader->frames.len)
+			return (true);
+		else {
+			return (midi_reader_read_one (reader) ==
+							MIDIF_COMPLETE);
+		}
+	}
+	else {
+		if (reader->frames.offset < reader->frames.len)
+			return (true);
+		else {
+			memset (&reader->frames, 0, sizeof (midi_frames_t));
+			return (midi_reader_read_one (reader) ==
+							MIDIF_COMPLETE);
+		}
+	}
+}
+
 midi_frame_t*
 midi_reader_get_next (midi_reader_t *reader)
 {
-	bool read = false;
-
-	if (reader == NULL)
+	if ( ! midi_reader_update (reader))
 		return (NULL);
-
-	if (reader->frames.len == MIDI_FRAMES_MAX) {
-		if (reader->frames.offset < reader->frames.len) {
-			return (&reader->frames.frames[
-						reader->frames.offset++]);
-		}
-		else
-			memset (&reader->frames, 0, sizeof (midi_frames_t));
-	}
-
-	if (reader->frames.len == 0 ||
-		reader->frames.offset >= reader->frames.len)
-		midi_reader_read_one (reader);
-
-	if (reader->frames.len > 0 &&
+	else if (reader->frames.len > 0 &&
 		reader->frames.offset < reader->frames.len)
 		return (&reader->frames.frames[reader->frames.offset++]);
 	else
@@ -263,9 +273,10 @@ bool
 midi_frame_expand_running (midi_frame_t *mf)
 {
 	if (mf == NULL || mf->data[0] < 0x80 ||
-		(mf->data[0] > 0xef || mf->len == 3) ||
-		((mf->len - 1) % 2))
-		return;
+		(mf->data[0] > 0xef || mf->len == 3))
+		return (true);
+	else if ((mf->len - 1) % 2)
+		return (false);
 	else if (mf->len + (mf->len - 1) / 2 > MIDI_FRAME_MAX)
 		return (false);
 	else {
@@ -279,6 +290,7 @@ midi_frame_expand_running (midi_frame_t *mf)
 			mf->data[mf->len++] = f.data[i];
 			mf->data[mf->len++] = f.data[i+1];
 		}
+		return (true);
 	}
 }
 
