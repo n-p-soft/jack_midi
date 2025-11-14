@@ -197,10 +197,9 @@ static int
 jack_midi_process_callback (jack_nframes_t nframes, void *reserved)
 {
 	if (nframes) {
-		jack_midi_read(nframes);
-		jack_midi_write(nframes);
+		jack_midi_read (nframes);
+		jack_midi_write (nframes);
 	}
-
 	return (0);
 }
 
@@ -281,6 +280,7 @@ usage()
 	"	-n specify Jack port name: default is jack_midi_...\n"
 	"       -g show trames (debug mode)\n"
 	"       -x expand running status MIDI frames\n"
+	"       -f <n> filter-out frames with status byte <n>\n"
 	"	-h (show help)\n",
 	JACK_MIDI_VERSION);
 	exit (0);
@@ -385,8 +385,13 @@ main(int argc, char **argv)
 	int expand = 0;
 	int background = 0;
 	midi_reader_flags_t flags = 0;
+	unsigned char to_skip[256];
+	int skipped = 0;
+	char *endptr;
+	long l;
 
-	while ((c = getopt(argc, argv, "U:kBd:hP:SC:n:gx")) != -1) {
+	to_skip[0] = 0;
+	while ((c = getopt(argc, argv, "U:kBd:hP:SC:n:gxf:")) != -1) {
 		switch (c) {
 		case 'k':
 			kill_on_close = 1;
@@ -395,21 +400,21 @@ main(int argc, char **argv)
 			background = 1;
 			break;
 		case 'd':
-			free(read_name);
-			free(write_name);
-			read_name = strdup(optarg);
-			write_name = strdup(optarg);
+			free (read_name);
+			free (write_name);
+			read_name = strdup (optarg);
+			write_name = strdup (optarg);
 			break;
 		case 'P':
-			free(write_name);
-			write_name = strdup(optarg);
+			free (write_name);
+			write_name = strdup (optarg);
 			break;
 		case 'C':
-			free(read_name);
-			read_name = strdup(optarg);
+			free (read_name);
+			read_name = strdup (optarg);
 			break;
 		case 'n':
-			free(port_name);
+			free (port_name);
 			port_name = strdup (optarg);
 			break;
 		case 'U':
@@ -421,6 +426,18 @@ main(int argc, char **argv)
 			break;
 		case 'x':
 			expand = 1;
+			break;
+		case 'f':
+			if (skipped == 254) {
+				errx (EX_USAGE,
+					"too many skipped status bytes.");
+			}
+			l = strtol (optarg, &endptr, 0);
+			if (l < 0 || l > 255 || (endptr && *endptr)) {
+				errx (EX_USAGE, "bad argument for -f (%s)",
+					optarg);
+			}
+			to_skip[skipped++] = (unsigned char) l;
 			break;
 		case 'h':
 		default:
@@ -447,7 +464,7 @@ main(int argc, char **argv)
 		flags += MIDIR_DEBUG;
 	if (expand)
 		flags += MIDIR_EXPAND;
-	midi_reader_init (&reader, flags, -1, NULL);
+	midi_reader_init (&reader, flags, -1, skipped ? to_skip : NULL);
 	jack_midi_openclose ();
 
 	/* create jack client */

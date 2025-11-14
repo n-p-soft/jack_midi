@@ -42,6 +42,7 @@
 .Op Fl U Ar <username>
 .Op Fl x
 .Op Fl g
+.Op Fl f Ar <status_code>
 .Op Fl h
 .Sh DESCRIPTION
 .Nm
@@ -70,6 +71,8 @@ Dump content of MIDI frame once it is read.
 .It Fl x
 Expand running status MIDI frames, for example (NOTEON event):
 0x90 x1 x2 x3 x4 -> 0x90 x1 x2 0x90 x3 x4.
+.It Fl f
+Filter-out frames with status byte (first byte) equal to given value. Option may appear multiple times on the command-line.
 .It Fl h
 Print help text showing available options.
 .El
