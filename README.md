@@ -1,6 +1,6 @@
 # jack_midi
 
-This program connects any raw MIDI device such as /dev/midiX or /dev/umidiX for USB MIDI one to a Jack server.
+This program connects any raw MIDI device such as /dev/midiX (or /dev/umidiX for USB) to a Jack server.
 
 It should work on any BSDs (tested on FreeBSD 13+). Note that under NetBSD and OpenBSD, MIDI devices are named /dev/rmidiXXX.
 
@@ -24,7 +24,7 @@ As an example, if you want to connect /dev/midi0.0 to Jack, use:
 
 	jack_midi -d /dev/midi0.0 -B
 
-which will launch it in background mode as a daemon. Jack will now manage the two MIDI ports _midi0.0.TX_ and _midi0.0.RX_. You can also add only a capture (*-C*) or playback (*-P*) device.
+This will launch the program in background mode as a daemon. Jack will now advertise two MIDI ports _midi0.0.TX_ and _midi0.0.RX_. You can also add a capture-only (*-C*) or playback-only (*-P*) device.
 
 See the man page jack_midi.8 for more details. You can dump the MIDI frames (*-g*) or expand running status frames (*-x*).
 
