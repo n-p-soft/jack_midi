@@ -38,11 +38,7 @@
 #include <errno.h>
 #include <sysexits.h>
 #include <sys/errno.h>
-#ifdef HAVE_SYSCTL
-#include <sys/sysctl.h>
-#endif
 #include <pwd.h>
-
 
 #include <jack/jack.h>
 #include <jack/midiport.h>
@@ -155,42 +151,41 @@ jack_midi_read (jack_nframes_t nframes)
 	if ( ! midi_reader_update (&reader))
 		return;
 
-	jack_midi_lock();
+	jack_midi_lock ();
 
 	if (output_port[0] == NULL)
 		buf = NULL;
 	else {
-		buf = jack_port_get_buffer(output_port[0], nframes);
+		buf = jack_port_get_buffer (output_port[0], nframes);
 		if (buf != NULL)
 			jack_midi_clear_buffer(buf);
 		else {
-			DPRINTF("jack: cannot send anything "
-				"on unit.\n");
+			DPRINTF ("jack: cannot send anything on unit.\n");
 		}
 	}
 	if (buf == NULL)
-		DPRINTF("Buffer full. MIDI event lost\n");
+		DPRINTF ("Buffer full. MIDI event lost\n");
 	else {
 		while (1) {
 			mf = midi_reader_get_next (&reader);
 			if (mf == NULL)
 				break;
-			buffer = jack_midi_event_reserve(buf,
+			buffer = jack_midi_event_reserve (buf,
 						jack_counter, mf->len);
 			if (buffer == NULL)
 				break;
 			jack_counter++;
-			memcpy(buffer, mf->data, mf->len);
+			memcpy (buffer, mf->data, mf->len);
 			if (debug_mode) {
 				dprintf (2, "frame#%i sent to jack: ",
 					jack_counter);
-				midi_frame_dump (2, mf);
+				midi_frame_dump (mf, 2);
 				dprintf (2, "\n");
 			}
 		}
 	}
 
-	jack_midi_unlock();
+	jack_midi_unlock ();
 }
 
 static int
@@ -219,7 +214,7 @@ jack_midi_openclose (void)
 			read_fd = open (read_name, O_RDONLY | O_NONBLOCK);
 			if (read_fd > -1) {
 				jack_midi_lock ();
-				midi_reader_set_fd (&reader, read_fd);
+				midi_reader_add_source (&reader, read_fd, 0);
 				jack_midi_unlock ();
 			}
 		}
@@ -285,7 +280,7 @@ usage (const char *msg)
 }
 
 static void
-jack_midi_pipe(int dummy)
+jack_midi_pipe (int dummy)
 {
 }
 
@@ -373,7 +368,7 @@ jack_midi_create_client (int background)
 }
 
 int
-main(int argc, char **argv)
+main (int argc, char **argv)
 {
 	int c;
 	int have_uid = 0;
@@ -527,7 +522,7 @@ main(int argc, char **argv)
 			midi_reader_clear_queue (&reader);
 
 		/* wait a bit */
-		usleep(1000);
+		usleep (500);
 	}
 
 	/* not reached */

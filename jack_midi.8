@@ -71,14 +71,14 @@ Terminate the client when the first capture or playback device is no longer avai
 .It Fl B
 Run the client in background mode.
 .It Fl d
-Specify the device name of the USB device to use, for example /dev/midi0.0 .
+Specify the device path to use, for example /dev/midi0.0 .
 .It Fl C
-Specify the capture only device name of the USB device to use, for example /dev/midi0.0 .
+Specify the capture-only device path to use .
+.It Fl P
+Specify the playback-only device path to use .
 .It Fl n
 Specify a full port name when registering with the JACK server.
 The default value is "jack_midi_midi0.0" for /dev/midi0.0.
-.It Fl P
-Specify the playback only device name of the USB device to use, for example /dev/midi0.0 .
 .It Fl U
 Specify which JACK user the program should attach to.
 Default is same as running user.

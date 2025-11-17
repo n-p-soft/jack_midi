@@ -29,20 +29,69 @@
 #include <unistd.h>
 #include <poll.h>
 #include <string.h>
+#include <stdarg.h>
+#include <errno.h>
 #include "midi_reader.h"
+
+int
+midi_reader_get_version ()
+{
+	return (MIDI_READER_VERSION);
+}
+
+static int
+midi_reader_poll_src (midi_reader_t *reader, int *src)
+{
+	*src = -1;
+	if (reader == NULL || reader->nsources == 0)
+		return (-1);
+	else {
+		struct pollfd pfd[MIDI_READER_IN_MAX];
+		int r, i;
+
+		for (i = 0; i < reader->nsources; i++) {
+			pfd[i].fd = reader->sources[i].fd;
+			pfd[i].events = POLLIN | POLLPRI;
+			pfd[i].revents = 0;
+		}
+		r = poll (pfd, reader->nsources, 0);
+		if (r <= 0)
+			return (r);
+		for (*src = 0; *src < reader->nsources; (*src)++) {
+			if (pfd[*src].revents & (POLLIN | POLLPRI))
+				break;
+		}
+		return (r);
+	}
+}
 
 int
 midi_reader_poll (midi_reader_t *reader)
 {
-	if (reader == NULL || reader->fd < 0)
-		return (-1);
-	else {
-		struct pollfd pfd[1];
+	int src;
 
-		pfd[0].fd = reader->fd;
-		pfd[0].events = POLLIN | POLLPRI;
-		return (poll(pfd, 1, 0));
+	return (midi_reader_poll_src (reader, &src));
+}
+
+static void
+midi_reader_reset_source (midi_reader_source_t *src, bool to_close)
+{
+	if (src) {
+		memset (src, 0, sizeof (midi_reader_source_t));
+		if (to_close) {
+			close (src->fd);
+			src->fd = -1;
+		}
+		src->push_back = -1;
+		src->channel = -1;
 	}
+}
+
+static void
+midi_reader_reset_source_n (midi_reader_t *reader, int src, bool to_close)
+{
+	if (src >= 0 && src < MIDI_READER_IN_MAX)
+		midi_reader_reset_source (&reader->sources[src], to_close);
 }
 
 void
@@ -52,62 +101,152 @@ midi_reader_init (midi_reader_t *reader, midi_reader_flags_t flags,
 	if (reader) {
 		memset (reader, 0, sizeof (midi_reader_t));
 		reader->flags = flags;
-		reader->fd = -1;
+		for (int i = 0; i < MIDI_READER_IN_MAX; i++)
+			midi_reader_reset_source_n (reader, i, false);
 		reader->dumpfd = -1;
 		reader->to_skip = to_skip;
-		reader->push_back = -1;
 	}
 }
 
-void
-midi_reader_close (midi_reader_t *reader)
+bool
+midi_reader_add_source_path (midi_reader_t *reader,
+				const char *path, int channel)
 {
-	if (reader) {
-		close (reader->fd);
-		reader->fd = -1;
-		reader->push_back = -1;
+	if (path) {
+		int fd = open (path, O_RDONLY | O_NONBLOCK);
+
+		if ( ! midi_reader_add_source (reader, fd, channel) &&
+			fd > -1)
+			close (fd);
+		else
+			return (true);
+	}
+	return (false);
+}
+
+bool
+midi_reader_add_source (midi_reader_t *reader, int fd, int channel)
+{
+	if (reader && fd > -1 && reader->nsources < MIDI_READER_IN_MAX) {
+		for (int i = 0; i < reader->nsources; i++) {
+			if (reader->sources[i].fd == fd)
+				return (true);
+		}
+		reader->sources[reader->nsources].fd = fd;
+		if (channel >= 1 && channel <= 16)
+			reader->sources[reader->nsources].channel = channel;
+		else
+			reader->sources[reader->nsources].channel = -1;
+		reader->nsources++;
+		return (true);
+	}
+	return (false);
+}
+
+bool
+midi_reader_remove_source (midi_reader_t *reader, int fd)
+{
+	int i, j;
+
+	if (reader == NULL || fd < 0 || reader->nsources == 0)
+		return (false);
+
+	for (i = 0; i < reader->nsources; i++) {
+		if (reader->sources[i].fd == fd)
+			break;
+	}
+	if (i >= reader->nsources)
+		return (false);
+	else {
+		midi_reader_reset_source_n (reader, i, true);
+		for (j = i + 1; j < MIDI_READER_IN_MAX; j++)
+			reader->sources[j - 1] = reader->sources[j];
+		midi_reader_reset_source_n (reader, j, false);
+		reader->nsources--;
+		return (true);
 	}
 }
 
-void
-midi_reader_set_fd (midi_reader_t *reader, int fd)
-{
-	if (reader)
-		reader->fd = fd;
-}
-
-void
+bool
 midi_reader_set_dump_fd (midi_reader_t *reader, int fd)
 {
-	if (reader)
+	if (reader && fd > -1) {
 		reader->dumpfd = fd;
+		return (true);
+	}
+	return (false);
+}
+
+bool
+midi_reader_set_dump_file (midi_reader_t *reader,
+				const char *path, bool trunc)
+{
+	if (reader && path) {
+		int mode = O_CREAT | O_WRONLY | O_CLOEXEC;
+		int fd;
+
+		if (trunc)
+			mode |= O_TRUNC;	
+		fd = open (path, mode, 0600);
+		if (fd > -1) {
+			if ( ! midi_reader_set_dump_fd (reader, fd))
+				close (fd);
+			else
+				return (true);
+		}
+	}
+	return (false);
+}
+
+void
+midi_reader_set_callback (midi_reader_t *reader,
+			midi_reader_callback_t cb, void *user_data)
+{
+	if (reader) {
+		reader->callback = cb;
+		reader->user_data = user_data;
+	}
+}
+
+static void
+midi_reader_read (midi_reader_t *reader)
+{
+	int r;
+	midi_reader_source_t *s;
+
+	for (int i = 0; i < reader->nsources; i++) {
+		s = &reader->sources[i];
+		if (s->push_back > -1)
+			continue;
+		if (s->buf_offset >= s->buf_len) {
+			s->buf_len = 0;
+			s->buf_offset = 0;
+		}
+		if (s->buf_len >= MIDI_READER_BUF_MAX)
+			continue;
+		r = read (s->fd, s->buf + s->buf_len,
+				MIDI_READER_BUF_MAX - s->buf_len);
+		if (r > 0)
+			s->buf_len += r;
+	}
 }
 
 static int
-midi_reader_get_byte (midi_reader_t *reader)
+midi_reader_get_byte (midi_reader_t *reader, int src)
 {
 	int r;
+	midi_reader_source_t *s = &reader->sources[src];
 
-	if (reader == NULL)
-		return (-1);
-	if (reader->push_back > -1) {
-		r = reader->push_back;
-		reader->push_back = -1;
+	if (s->push_back > -1) {
+		/* requested source has a push-backed byte */
+		r = s->push_back;
+		s->push_back = -1;
 		return (r);
 	}
-	if (reader->buf_offset >= reader->buf_len) {
-		reader->buf_offset = 0;
-		reader->buf_len = 0;
+	else if (s->buf_len > 0 && s->buf_offset < s->buf_len) {
+		/* requested source has a buffered byte */
+		return (s->buf[s->buf_offset++]);
 	}
-	if (reader->buf_len < MIDI_READER_BUF_MAX) {
-		r = read (reader->fd, (char*) &reader->buf[reader->buf_len],
-				MIDI_READER_BUF_MAX - reader->buf_len);
-
-		if (r > 0)
-			reader->buf_len += r;
-	}
-	if (reader->buf_len > 0 && reader->buf_offset < reader->buf_len)
-		return (reader->buf[reader->buf_offset++]);
 	else
 		return (-1);
 }
@@ -122,93 +261,216 @@ midi_frame_reset (midi_frame_t *mf)
 }
 
 static midi_frame_state_t
-midi_frame_process (midi_reader_t *reader, midi_frame_t *mf)
+midi_frame_process (midi_reader_t *reader, midi_frame_t *mf,
+			midi_reader_source_t *src)
 {
-	if (reader->to_skip) {
-		const unsigned char *p;
+	bool skipped = false;
+	const unsigned char *p;
+	midi_frame_state_t st;
 
+	if (mf->len == 0)
+		return (MIDIF_NODATA);
+	src->stats.read++;
+	reader->total.read++;
+	if (reader->to_skip) {
 		for (p = reader->to_skip; *p; p++) {
-			if (mf->data[0] == *p)
+			if (mf->data[0] == *p) {
+				skipped = true;
 				break;
-		}
-		if (*p) {
-			if (reader->flags & MIDIR_DEBUG) {
-				dprintf (2, "skipped frame: ");
-				midi_frame_dump (2, mf);
-				dprintf (2, "\n");
 			}
-			midi_frame_reset (mf);
-			return (MIDIF_NEXT);
 		}
 	}
+	if (reader->flags & MIDIR_DEBUG) {
+		dprintf (2, "incoming frame%s",
+				skipped ? " (skipped): " : ": ");
+		midi_frame_dump (mf, 2);
+		dprintf (2, "\n");
+	}
+	if (skipped) {
+		src->stats.skipped++;
+		reader->total.skipped++;
+		return (MIDIF_SKIPPED);
+	}
+
+	/* channel translation */
+	if (src->channel > 0) {
+		if (mf->data[0] >= 0x80 && mf->data[0] <= 0xef) {
+			mf->data[0] = mf->data[0] & 0xF0;
+			mf->data[0] |= src->channel - 1;
+		}
+	}
+
+	/* running-status expansion */
 	if (reader->flags & MIDIR_EXPAND)
 		midi_frame_expand_running (mf);
-	if (reader->dumpfd > 0) {
-		if (reader->flags & MIDIR_DUMPHEX)
-			midi_frame_dump (reader->dumpfd, mf);
-		else
-			dprintf (reader->dumpfd, (char*) mf->data, mf->len);
+
+	/* user callback */
+	if (reader->callback) {
+		st = reader->callback (mf, reader->user_data);
+		if (mf->len == 0)
+			return (MIDIF_NODATA);
+		else if (st == MIDIF_SKIPPED) {
+			src->stats.skipped++;
+			reader->total.skipped++;
+			return (MIDIF_SKIPPED);
+		}
+		else if (st != MIDIF_COMPLETE) {
+			src->stats.errors++;
+			reader->total.errors++;
+			return (st);
+		}
 	}
+
+	/* dump */
+	if (reader->dumpfd > -1) {
+		if (reader->flags & MIDIR_DUMPHEX)
+			midi_frame_dump (mf, reader->dumpfd);
+		else
+			write (reader->dumpfd, (char*) mf->data, mf->len);
+	}
+
+	/* store */
+	if (reader->frames.len == reader->frames.offset) {
+		reader->frames.len = 0;
+		reader->frames.offset = 0;
+	}
+	if (reader->frames.len < MIDI_READER_FRAMES_MAX) {
+		memcpy (&reader->frames.frames[reader->frames.len++],
+			mf, sizeof (midi_frame_t));
+	}
+	else
+		reader->total.missed++;
+
 	return (MIDIF_COMPLETE);
 }
 
-midi_frame_state_t
-midi_frame_push (midi_reader_t *reader, midi_frame_t *mf)
+void
+midi_reader_close (midi_reader_t *reader)
+{
+	int i;
+
+	if (reader == NULL || reader->nsources == 0)
+		return;
+
+	for (i = 0; i < reader->nsources; i++)
+		midi_reader_reset_source_n (reader, i, true);
+
+	if (reader->dumpfd > -1) {
+		close (reader->dumpfd);
+		reader->dumpfd = -1;
+	}
+}
+
+static midi_frame_state_t
+midi_reader_push_byte (midi_reader_t *reader, midi_reader_source_t *src,
+			int data)
 {
 	int len;
-	int b;
+	midi_frame_t *mf = &src->current;
+	unsigned char b;
 
-	if (reader == NULL || mf == NULL)
+	if (data < 0)
 		return (MIDIF_NODATA);
+	else if (data > 0xFF) {
+		src->stats.errors++;
+		src->running = 0;
+		reader->total.errors++;
+		return (MIDIF_IOERROR);
+	}
+	b = (unsigned char) data;
 	if (mf->len == MIDI_FRAME_MAX) {
 		/* error, too long frame */
-		midi_frame_reset (mf);
-		reader->running = 0;
+		src->running = 0;
+		src->stats.errors++;
+		reader->total.errors++;
 		return (MIDIF_ERROR);
 	}
-	b = midi_reader_get_byte (reader);
-	if (b < 0)
-		return (MIDIF_NODATA);
-	else if (b > 0xFF)
-		return (MIDIF_IOERROR);
-	if (reader->running != 0 && (b & 0x80) != 0) {
-		reader->push_back = b;
-		reader->running = 0;
+	if (src->running != 0 && (b & 0x80) != 0) {
+		src->push_back = b;
+		src->running = 0;
 		if (mf->len == 0 || ((mf->len - 1) % 2)) {
-			midi_frame_reset (mf);
+			src->stats.errors++;
+			reader->total.errors++;
 			return (MIDIF_ERROR);
 		}
 		else
-			return (midi_frame_process (reader, mf));
+			return (midi_frame_process (reader, mf, src));
 	}
 	if (mf->len == 0) {
 		if (b >= 0x80 && b <= 0xef)
-			reader->running = b;
+			src->running = b;
 		else
-			reader->running = 0;
+			src->running = 0;
 	}
 
 	mf->data[mf->len++] = (unsigned char) b;
-	len = midi_frame_len[mf->data[0]];
-	if (len == -1) {
-		/* error */
-		reader->running = 0;
-		midi_frame_reset (mf);
+	if ( ! (mf->data[0] & 0x80)) {
+		/* bad byte */
+		src->stats.errors++;
+		src->running = 0;
+		reader->total.errors++;
 		return (MIDIF_ERROR);
 	}
-	else if (len == -0xf0 && mf->len > 1) {
+
+	len = midi_frame_len[mf->data[0] - 0x80];
+	if (len == -0xf0 && mf->len > 1) {
 		/* system exclusive */
 		if (b == 0xf7)
-			return (midi_frame_process (reader, mf));
+			return (midi_frame_process (reader, mf, src));
 	}
-	else if (reader->running == 0 && len == mf->len)
-		return (midi_frame_process (reader, mf));
+	else if (src->running == 0 && len == mf->len)
+		return (midi_frame_process (reader, mf, src));
 
 	return (MIDIF_NEXT);
 }
 
+int
+midi_reader_inject (midi_reader_t *reader, midi_frame_t *mf)
+{
+	midi_reader_source_t src;
+	midi_frame_state_t r;
+	int i;
+
+	if (reader == NULL || mf == NULL || mf->len == 0)
+		return (0);
+	midi_reader_reset_source (&src, false);
+	src.fd = -1;
+	for (i = 0; i < mf->len; i++) {
+		r = midi_reader_push_byte (reader, &src, mf->data[i]);
+		switch (r) {
+		case MIDIF_COMPLETE:
+		case MIDIF_NEXT:
+			continue;
+		default:
+			return (i);
+		}
+	}
+	/* push a fake active-sensing to conclude any pending running-status
+	 * frame */
+	if (src.running != 0)
+		midi_reader_push_byte (reader, &src, 0xfe);
+	return (i);
+}
+
+int
+midi_reader_inject_bytes (midi_reader_t *reader, int n, ...)
+{
+	midi_frame_t f;
+	va_list va;
+
+	if (reader == NULL || n <= 0 || n > MIDI_FRAME_MAX)
+		return (0);
+	midi_frame_reset (&f);
+	va_start (va, n);
+	for (int i = 0; i < n; i++)
+		f.data[i] = va_arg (va, int);
+	va_end (va);
+	f.len = n;
+	return (midi_reader_inject (reader, &f));
+}
+
 void
-midi_frame_dump (int fd, midi_frame_t *mf)
+midi_frame_dump (midi_frame_t *mf, int fd)
 {
 	if (fd > -1 && mf) {
 		for (int j = 0; j < mf->len; j++)
@@ -216,49 +478,45 @@ midi_frame_dump (int fd, midi_frame_t *mf)
 	}
 }
 
-static midi_frame_state_t
-midi_reader_read_one (midi_reader_t *reader)
-{
-	midi_frame_state_t r;
-	midi_frame_t *current;
-
-	current = &reader->frames.frames[reader->frames.len];
-	r = midi_frame_push (reader, current);
-	if (r == MIDIF_COMPLETE) {
-		if (reader->flags & MIDIR_DEBUG) {
-			dprintf (2, "read frame#%i: ", reader->frames.len);
-			midi_frame_dump (2, current);
-			dprintf (2, "\n");
-		}
-		reader->frames.len++;
-	}
-	return (r);
-}
-
 bool
 midi_reader_update (midi_reader_t *reader)
 {
+	static int start = -1;
+	midi_frame_state_t r;
+	midi_reader_source_t *s;
+	int src, i, b;
+
 	if (reader == NULL)
 		return (false);
-	else if (reader->frames.len == 0)
-		return (midi_reader_read_one (reader) == MIDIF_COMPLETE);
-	else if (reader->frames.len < MIDI_FRAMES_MAX) {
-		if (reader->frames.offset < reader->frames.len)
-			return (true);
-		else {
-			return (midi_reader_read_one (reader) ==
-							MIDIF_COMPLETE);
+
+	/* read all sources */
+	midi_reader_read (reader);
+
+	/* fill the queue */
+	if (++start >= reader->nsources)
+		start = 0;
+	for (src = start, i = 0; i < reader->nsources; i++, src++) {
+		if (src >= reader->nsources)
+			src = 0;
+
+		s = &reader->sources[src];
+		b = midi_reader_get_byte (reader, src);
+		r = midi_reader_push_byte (reader, &reader->sources[src], b);
+		switch (r) {
+		case MIDIF_COMPLETE:
+		case MIDIF_ERROR:
+		case MIDIF_IOERROR:
+		case MIDIF_SKIPPED:
+			midi_frame_reset (&s->current);
+			break;
+		case MIDIF_NODATA:
+		case MIDIF_NEXT:
+			break;
 		}
 	}
-	else {
-		if (reader->frames.offset < reader->frames.len)
-			return (true);
-		else {
-			memset (&reader->frames, 0, sizeof (midi_frames_t));
-			return (midi_reader_read_one (reader) ==
-							MIDIF_COMPLETE);
-		}
-	}
+	
+	return (reader->frames.len > 0 &&
+		reader->frames.offset < reader->frames.len);
 }
 
 midi_frame_t*
@@ -266,22 +524,16 @@ midi_reader_get_next (midi_reader_t *reader)
 {
 	if ( ! midi_reader_update (reader))
 		return (NULL);
-	else if (reader->frames.len > 0 &&
-		reader->frames.offset < reader->frames.len)
-		return (&reader->frames.frames[reader->frames.offset++]);
 	else
-		return (NULL);
+		return (&reader->frames.frames[reader->frames.offset++]);
 }
 
 void
 midi_reader_clear_queue (midi_reader_t *reader)
 {
 	if (reader->frames.len > 0) {
-		memcpy (&reader->frames.frames[0],
-			&reader->frames.frames[reader->frames.len],
-			sizeof (midi_frame_t));
-		reader->frames.len = 0;
-		reader->frames.offset = 0;
+		memset (&reader->frames, 0,
+			sizeof (midi_frames_t));
 	}
 }
 
@@ -308,5 +560,31 @@ midi_frame_expand_running (midi_frame_t *mf)
 		}
 		return (true);
 	}
+}
+
+bool
+midi_reader_get_stats (midi_reader_t *reader, int n, midi_reader_stats_t *stats)
+{
+	if (reader == NULL || n < -1 || n >= reader->nsources || stats == NULL)
+		return (false);
+	if (n == -1)
+		*stats = reader->total;
+	else
+		*stats = reader->sources[n].stats;
+	return (true);
+}
+
+void
+midi_reader_reset_stats (midi_reader_t *reader, int n)
+{
+	if (reader == NULL || n < -1 || n >= reader->nsources)
+		return;
+	else if (n == -1)
+		memset (&reader->total, 0, sizeof (midi_reader_stats_t));
+	else {
+		memset (&reader->sources[n].stats, 0,
+			sizeof (midi_reader_stats_t));
+	}
+
 }
 
