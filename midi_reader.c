@@ -115,11 +115,12 @@ midi_reader_add_source_path (midi_reader_t *reader,
 	if (path) {
 		int fd = open (path, O_RDONLY | O_NONBLOCK);
 
-		if ( ! midi_reader_add_source (reader, fd, channel) &&
-			fd > -1)
-			close (fd);
-		else
-			return (true);
+		if (fd > -1) {
+			if ( ! midi_reader_add_source (reader, fd, channel))
+				close (fd);
+			else
+				return (true);
+		}
 	}
 	return (false);
 }
