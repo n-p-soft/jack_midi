@@ -262,48 +262,10 @@ midi_frame_reset (midi_frame_t *mf)
 }
 
 static midi_frame_state_t
-midi_frame_process (midi_reader_t *reader, midi_frame_t *mf,
+midi_reader_push_frame (midi_reader_t *reader, midi_frame_t *mf,
 			midi_reader_source_t *src)
 {
-	bool skipped = false;
-	const unsigned char *p;
 	midi_frame_state_t st;
-
-	if (mf->len == 0)
-		return (MIDIF_NODATA);
-	src->stats.read++;
-	reader->total.read++;
-	if (reader->to_skip) {
-		for (p = reader->to_skip; *p; p++) {
-			if (mf->data[0] == *p) {
-				skipped = true;
-				break;
-			}
-		}
-	}
-	if (reader->flags & MIDIR_DEBUG) {
-		dprintf (2, "incoming frame%s",
-				skipped ? " (skipped): " : ": ");
-		midi_frame_dump (mf, 2);
-		dprintf (2, "\n");
-	}
-	if (skipped) {
-		src->stats.skipped++;
-		reader->total.skipped++;
-		return (MIDIF_SKIPPED);
-	}
-
-	/* channel translation */
-	if (src->channel > 0) {
-		if (mf->data[0] >= 0x80 && mf->data[0] <= 0xef) {
-			mf->data[0] = mf->data[0] & 0xF0;
-			mf->data[0] |= src->channel - 1;
-		}
-	}
-
-	/* running-status expansion */
-	if (reader->flags & MIDIR_EXPAND)
-		midi_frame_expand_running (mf);
 
 	/* user callback */
 	if (reader->callback) {
@@ -345,6 +307,66 @@ midi_frame_process (midi_reader_t *reader, midi_frame_t *mf,
 	return (MIDIF_COMPLETE);
 }
 
+static midi_frame_state_t
+midi_frame_process (midi_reader_t *reader, midi_frame_t *mf,
+			midi_reader_source_t *src)
+{
+	bool skipped = false;
+	const unsigned char *p;
+
+	if (mf->len == 0)
+		return (MIDIF_NODATA);
+	src->stats.read++;
+	reader->total.read++;
+	if (reader->to_skip) {
+		for (p = reader->to_skip; *p; p++) {
+			if (mf->data[0] == *p) {
+				skipped = true;
+				break;
+			}
+		}
+	}
+	if (reader->flags & MIDIR_DEBUG) {
+		dprintf (2, "incoming frame%s",
+				skipped ? " (skipped): " : ": ");
+		midi_frame_dump (mf, 2);
+		dprintf (2, "\n");
+	}
+	if (skipped) {
+		src->stats.skipped++;
+		reader->total.skipped++;
+		return (MIDIF_SKIPPED);
+	}
+
+	/* channel translation */
+	if (src->channel > 0) {
+		if (mf->data[0] >= 0x80 && mf->data[0] <= 0xef) {
+			mf->data[0] = mf->data[0] & 0xF0;
+			mf->data[0] |= src->channel - 1;
+		}
+	}
+
+	/* running-status expansion ? */
+	if ( ! (reader->flags & MIDIR_EXPAND) ||
+		(mf->data[0] < 0x80 || mf->data[0] > 0xef || mf->len == 3))
+		return (midi_reader_push_frame (reader, mf, src));
+	else if ((mf->len - 1) % 2)
+		return (MIDIF_ERROR);
+	else {
+		int i;
+		midi_frame_t f;
+
+		f.len = 3;
+		for (i = 1; i < mf->len; i += 2) {
+			f.data[0] = mf->data[0];
+			f.data[1] = mf->data[i];
+			f.data[2] = mf->data[i+1];
+			midi_reader_push_frame (reader, &f, src);
+		}
+		return (MIDIF_COMPLETE);
+	}
+}
+
 void
 midi_reader_close (midi_reader_t *reader)
 {
@@ -369,60 +391,67 @@ midi_reader_push_byte (midi_reader_t *reader, midi_reader_source_t *src,
 	int len;
 	midi_frame_t *mf = &src->current;
 	unsigned char b;
+	midi_frame_state_t r;
 
-	if (data < 0)
-		return (MIDIF_NODATA);
-	else if (data > 0xFF) {
-		src->stats.errors++;
-		src->running = 0;
-		reader->total.errors++;
-		return (MIDIF_IOERROR);
-	}
 	b = (unsigned char) data;
-	if (mf->len == MIDI_FRAME_MAX) {
+	if (data < 0)
+		r = MIDIF_NODATA;
+	else if (data > 0xFF)
+		r = MIDIF_IOERROR;
+	else if (mf->len == MIDI_FRAME_MAX) {
 		/* error, too long frame */
-		src->running = 0;
-		src->stats.errors++;
-		reader->total.errors++;
-		return (MIDIF_ERROR);
+		r = MIDIF_ERROR;
 	}
-	if (src->running != 0 && (b & 0x80) != 0) {
+	else if (src->running != 0 && (b & 0x80) != 0) {
 		src->push_back = b;
 		src->running = 0;
-		if (mf->len == 0 || ((mf->len - 1) % 2)) {
-			src->stats.errors++;
-			reader->total.errors++;
-			return (MIDIF_ERROR);
-		}
+		if (mf->len == 0 || ((mf->len - 1) % 2))
+			r = MIDIF_ERROR;
 		else
-			return (midi_frame_process (reader, mf, src));
+			r = midi_frame_process (reader, mf, src);
 	}
-	if (mf->len == 0) {
-		if (b >= 0x80 && b <= 0xef)
-			src->running = b;
-		else
-			src->running = 0;
+	else {
+		if (mf->len == 0) {
+			if (b >= 0x80 && b <= 0xef)
+				src->running = b;
+			else
+				src->running = 0;
+		}
+
+		mf->data[mf->len++] = (unsigned char) b;
+		if ( ! (mf->data[0] & 0x80)) {
+			/* bad byte */
+			r = MIDIF_ERROR;
+		}
+		else {
+			len = midi_frame_len[mf->data[0] - 0x80];
+			if (len == -0xf0 && mf->len > 1) {
+				/* system exclusive */
+				if (b == 0xf7) {
+					r = midi_frame_process (reader,
+								mf, src);
+				}
+				else
+					r = MIDIF_NEXT;
+			}
+			else if (src->running == 0 && len == mf->len)
+				r = midi_frame_process (reader, mf, src);
+			else
+				r = MIDIF_NEXT;
+		}
 	}
 
-	mf->data[mf->len++] = (unsigned char) b;
-	if ( ! (mf->data[0] & 0x80)) {
-		/* bad byte */
+	switch (r) {
+	case MIDIF_ERROR:
+	case MIDIF_IOERROR:
 		src->stats.errors++;
 		src->running = 0;
 		reader->total.errors++;
-		return (MIDIF_ERROR);
+		break;
+	default:
+		break;
 	}
-
-	len = midi_frame_len[mf->data[0] - 0x80];
-	if (len == -0xf0 && mf->len > 1) {
-		/* system exclusive */
-		if (b == 0xf7)
-			return (midi_frame_process (reader, mf, src));
-	}
-	else if (src->running == 0 && len == mf->len)
-		return (midi_frame_process (reader, mf, src));
-
-	return (MIDIF_NEXT);
+	return (r);
 }
 
 int
@@ -535,31 +564,6 @@ midi_reader_clear_queue (midi_reader_t *reader)
 	if (reader->frames.len > 0) {
 		memset (&reader->frames, 0,
 			sizeof (midi_frames_t));
-	}
-}
-
-bool
-midi_frame_expand_running (midi_frame_t *mf)
-{
-	if (mf == NULL || mf->data[0] < 0x80 ||
-		(mf->data[0] > 0xef || mf->len == 3))
-		return (true);
-	else if ((mf->len - 1) % 2)
-		return (false);
-	else if (mf->len + (mf->len - 1) / 2 > MIDI_FRAME_MAX)
-		return (false);
-	else {
-		int i;
-		midi_frame_t f;
-
-		memcpy (&f, mf, sizeof (midi_frame_t));
-		midi_frame_reset (mf);
-		for (i = 1; i < f.len; i += 2) {
-			mf->data[mf->len++] = f.data[0];
-			mf->data[mf->len++] = f.data[i];
-			mf->data[mf->len++] = f.data[i+1];
-		}
-		return (true);
 	}
 }
 

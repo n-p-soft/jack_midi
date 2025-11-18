@@ -33,7 +33,7 @@
 extern "C" {
 #endif
 
-#define MIDI_READER_VERSION	103
+#define MIDI_READER_VERSION	104
 
 /* state of MIDI frame */
 typedef enum midi_frame_state_t {
@@ -245,13 +245,6 @@ midi_reader_get_next (midi_reader_t *reader);
 /* Remove all recorded frames. */
 void
 midi_reader_clear_queue (midi_reader_t *reader);
-
-/* Expand given MIDI frame if it is a running status one. May return false on
- * error, for example if there was not enough room available into 'mf' (but
- * this should not occur).
- */
-bool
-midi_frame_expand_running (midi_frame_t *mf);
 
 /* Get the statistics for the nth input source (0..; if -1: cumulated).
  * Returns false on failure.
